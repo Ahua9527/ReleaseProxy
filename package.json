@@ -1,0 +1,27 @@
+{
+  "name": "release-proxy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "多产品私有 GitHub Release 分发与原生自动更新源",
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "dev": "bunx --bun wrangler dev",
+    "lint": "bunx --bun eslint .",
+    "typecheck": "bunx --bun tsc --noEmit",
+    "format:check": "bunx --bun prettier --check .",
+    "test": "vitest run",
+    "build": "bunx --bun wrangler deploy --dry-run --outdir .wrangler/build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.4",
+    "eslint": "10.12.0",
+    "globals": "17.13.0",
+    "prettier": "3.9.9",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.3",
+    "wrangler": "4.147.0"
+  }
+}
