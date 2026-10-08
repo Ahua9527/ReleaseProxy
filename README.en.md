@@ -69,7 +69,9 @@ Field rules:
 - `assets` is a required array of allowed asset name patterns. `*` matches any characters except `/`;
   `{version}` expands to the tag with its leading `v` removed. Other characters are literal and the
   entire name must match. A pattern containing `{version}` only matches that tag's own files, preventing
-  a different version's file from being attached to the current tag. Prefer explicit allowlists.
+  a different version's file from being attached to the current tag. For that reason `{version}` must not
+  be directly next to `*` (`app-{version}*` is rejected as invalid configuration); use a fixed separator
+  such as `_`, `-` or `.`. Prefer explicit allowlists.
 - `latest` optionally maps aliases to asset name templates, with the same `{version}` substitution.
   Fixed manifests can map to themselves, e.g. `"latest.json": "latest.json"`. Targets must still match
   `assets`; `*` is not expanded here, so an alias must identify an exact file.

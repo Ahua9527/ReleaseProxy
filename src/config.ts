@@ -52,7 +52,10 @@ function parseProducts(raw: unknown): Config['products'] {
         !isRecord(item) ||
         !validRepository(item.repository) ||
         !Array.isArray(item.assets) ||
-        !item.assets.every(validName) ||
+        // `*` 紧挨 `{version}` 会让 1.2.3 匹配到 1.2.33，无法保证文件属于当前 tag。
+        !item.assets.every(
+          (asset) => validName(asset) && !/\*\{version\}|\{version\}\*/.test(asset),
+        ) ||
         (item.tagPattern !== undefined && typeof item.tagPattern !== 'string') ||
         (item.publicReleasePage !== undefined && typeof item.publicReleasePage !== 'string')
       )

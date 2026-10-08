@@ -549,6 +549,7 @@ describe('环境配置与附件规则', () => {
     { first: { ...fixtures.first, repository: 'https://attacker.example/file' } },
     { first: { ...fixtures.first, assets: ['dir/file.zip'] } },
     { first: { ...fixtures.first, assets: 'app.zip' } },
+    { first: { ...fixtures.first, assets: ['app-{version}*'] } },
     { first: { ...fixtures.first, latest: { 'desktop.zip': 42 } } },
     { first: { ...fixtures.first, latest: null } },
     { first: { ...fixtures.first, tagPattern: '[' } },

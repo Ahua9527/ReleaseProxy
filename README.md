@@ -66,7 +66,9 @@ ReleaseProxy 是运行在 Cloudflare Workers 上的 GitHub Release 下载代理�
 - `repository` 必填，使用 `owner/repo`，不接受任意 URL。
 - `assets` 必填，为允许公开的附件名模式数组。`*` 匹配任意字符但不含 `/`；`{version}`
   替换为 tag 去掉开头 `v` 后的版本号。其余字符按字面匹配，整串匹配；含 `{version}` 的
-  模式只匹配该 tag 自己的文件，不能把另一版本文件挂到当前 tag。尽量使用明确的白名单。
+  模式只匹配该 tag 自己的文件，不能把另一版本文件挂到当前 tag；为此 `{version}` 两侧不能
+  紧挨 `*`（如 `app-{version}*` 会被判为配置无效），请用 `_`、`-`、`.` 等固定分隔符。
+  尽量使用明确的白名单。
 - `latest` 可选，别名映射到附件名模板，使用相同的 `{version}` 替换规则。固定清单可映射
   到自身，如 `"latest.json": "latest.json"`。别名对应的文件仍须符合 `assets` 白名单；这里的
   `*` 不展开，别名必须指向确定文件。
