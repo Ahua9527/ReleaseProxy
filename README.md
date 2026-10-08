@@ -11,14 +11,16 @@ ReleaseProxy 将多个产品的私有 GitHub Release 中获准的发布文件，
 
 ## 接口
 
-| 路径                                         | 行为                                      | 缓存         |
-| -------------------------------------------- | ----------------------------------------- | ------------ |
-| `/<product>/releases/latest`                 | 最新稳定 Release 的必要信息和获准资产链接 | 5 分钟       |
-| `/<product>/releases/download/<tag>/<asset>` | 指定稳定 Release 中的白名单资产           | 1 年、不可变 |
-| `/<product>/latest/<alias>`                  | 登记的最新安装包或文件别名                | 5 分钟       |
-| `/<product>/<native-manifest>`               | 登记的原生更新清单                        | 5 分钟       |
+| 路径                                                                  | 行为                                      | 缓存         |
+| --------------------------------------------------------------------- | ----------------------------------------- | ------------ |
+| `/<product>/releases/latest`                                          | 最新稳定 Release 的必要信息和获准资产链接 | 5 分钟       |
+| `/<product>/releases/download/<tag>/<asset>`                          | 指定稳定 Release 中的白名单资产           | 1 年、不可变 |
+| `/<product>/latest/<alias>`                                           | 登记的最新安装包或文件别名                | 5 分钟       |
+| `/<product>/<native-manifest>`                                        | 登记的原生更新清单                        | 5 分钟       |
+| `/https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>`  | 登记公开仓库的 Release 附件               | 7 天         |
+| `/https://github.com/<owner>/<repo>/releases/latest/download/<asset>` | 登记公开仓库的最新 Release 附件           | 5 分钟       |
 
-只接收 GET。未知产品、路径、资产、tag 和草稿 / 预发布版本均拒绝。文件响应流式转发，
+只接收 GET。产品接口拒绝未知产品、路径、资产、tag 和草稿 / 预发布版本。文件响应流式转发，
 GitHub 的临时下载跳转仅允许 HTTPS GitHub 资产域名，且不携带产品令牌。
 
 Release 信息只含 `tag_name`、`published_at`、稳定版标志和获准的 `assets`；资产的
@@ -34,6 +36,26 @@ IPG Scope 既有地址保持可用：
 - `/ipg-scope/latest/macos-universal.dmg`
 - `/ipg-scope/latest/windows-amd64.exe`
 - `/ipg-scope/latest/windows-arm64.exe`
+
+## 公开仓库加速
+
+在 `src/products.ts` 的 `publicRepositories` 中登记允许匿名加速的公开仓库，使用 GitHub
+规范大小写的 `owner/repo`；当前示例为 `jqlang/jq`。请求中的仓库名比较忽略大小写，上游
+地址始终使用登记名称，不需要也不携带任何令牌。
+
+在 GitHub Release 附件直链前加 `https://updates.ahua.space/` 即可加速下载。以下三种
+地址写法都支持，包括 Cloudflare 将路径中的 `//` 合并后的形式：
+
+- `https://updates.ahua.space/https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64`
+- `https://updates.ahua.space/https:/github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64`
+- `https://updates.ahua.space/github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64`
+
+将 `releases/download/<tag>/<asset>` 换成 `releases/latest/download/<asset>` 可下载最新
+Release 的附件，缓存 5 分钟。第三方仓库可能覆盖已发布资产，所以版本化附件只缓存 7 天。
+
+只接受 GET，不支持 Range 或 HEAD；只转发登记仓库的 Release 附件，不提供源码归档、
+`archive`、`blob`、`releases.atom` 或 GitHub API 代理。加速请求也计入账号每日 10 万次额度，
+缓存命中同样计入。
 
 ## 登记产品
 
@@ -71,8 +93,11 @@ bunx --bun wrangler secret put IPG_SCOPE_RELEASES_READ_TOKEN
 
 ## 本地检查与 CI
 
-环境为 `.bun-version` 指定的 Bun，Vitest 使用 Node 24。工具依赖及 Wrangler 均固定版本并
-由 `bun.lock` 锁定；Worker 运行期只使用标准 Web API。
+环境为 `.bun-version` 指定的 Bun，Vitest 使用 `.node-version` 指定的 Node 24。
+工具依赖及 Wrangler 均固定版本并由 `bun.lock` 锁定；Worker 运行期只使用标准 Web API。
+
+`bun run typecheck` 分别检查 `tsconfig.json` 中的 Worker 代码与 `tsconfig.test.json` 中的
+测试及 Vitest 配置；Worker 不允许使用 Node 全局。
 
 ```bash
 bun install --frozen-lockfile
@@ -88,7 +113,8 @@ bun run build
 
 ## 部署与费用
 
-部署配置只绑定 `updates.ahua.space`，关闭 `workers.dev` 和预览 URL，并启用 Workers Cache。
+部署配置只绑定 `updates.ahua.space`，关闭 `workers.dev` 和预览 URL，并启用 Workers Cache
+与 Workers Logs；只记录缺少令牌及上游失败，不记录每次调用。
 完成每产品 Secret、Cloudflare 域名和 Free 计划核查后，维护者可显式部署：
 
 ```bash
@@ -98,6 +124,7 @@ bunx --bun wrangler deploy
 保持 Workers Free。100,000 次每日请求额度属于整个账号，UTC 零点重置；所有产品及该账号
 其他 Worker 共享额度，缓存命中同样计入。达到上限后 Cloudflare 返回 1027；自定义域名以
 Worker 为源站，没有绕过代理的回退入口。服务不自动切换到付费计划。
+公开仓库加速流量也占用这份每日额度。
 [Cloudflare 请求限额](https://developers.cloudflare.com/workers/platform/limits/)、
 [Workers Cache 计费](https://developers.cloudflare.com/workers/cache/)
 

@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "bunx --bun wrangler dev",
     "lint": "bunx --bun eslint .",
-    "typecheck": "bunx --bun tsc --noEmit",
+    "typecheck": "bunx --bun tsc -p tsconfig.json && bunx --bun tsc -p tsconfig.test.json",
     "format:check": "bunx --bun prettier --check .",
     "test": "vitest run",
     "build": "bunx --bun wrangler deploy --dry-run --outdir .wrangler/build"

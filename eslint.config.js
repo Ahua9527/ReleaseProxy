@@ -9,10 +9,22 @@ export default tseslint.config(
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2022,
-      globals: { ...globals.worker, ...globals.node },
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
+    },
+  },
+  {
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/*.test.ts'],
+    languageOptions: {
+      globals: globals.worker,
+    },
+  },
+  {
+    files: ['src/**/*.test.ts', 'vitest.config.ts'],
+    languageOptions: {
+      globals: globals.node,
     },
   },
 );

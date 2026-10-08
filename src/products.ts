@@ -13,6 +13,9 @@ export interface Product {
 
 export type ProductRegistry = Readonly<Record<string, Product>>;
 
+// 允许匿名加速的公开仓库（owner/repo，用 GitHub 规范大小写）；只分发 Release 附件。
+export const publicRepositories: readonly string[] = ['jqlang/jq'];
+
 const targets = ['darwin-universal', 'windows-amd64', 'windows-arm64'] as const;
 const versionPattern = '(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)';
 const targetPattern = targets.join('|');

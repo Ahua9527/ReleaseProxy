@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createHandler } from './index';
+import { createHandler, PUBLIC_ORIGIN } from './index';
 import { products } from './products';
 import type { Product, ProductRegistry } from './products';
 
@@ -353,6 +353,115 @@ describe('多产品 ReleaseProxy', () => {
   });
 });
 
+describe('公开仓库 Release 附件加速', () => {
+  it.each(['https://', 'https:/', ''])(
+    '%s 前缀匿名下载登记仓库，并使用 7 天缓存',
+    async (prefix) => {
+      const urls: string[] = [];
+      const fetcher = fetchMock((remote) => {
+        urls.push(remote.url);
+        expect(remote.headers.has('Authorization')).toBe(false);
+        expect(remote.headers.get('User-Agent')).toBe('ReleaseProxy');
+        expect(remote.redirect).toBe('manual');
+        if (
+          remote.url === 'https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64'
+        ) {
+          return new Response(null, {
+            status: 302,
+            headers: { Location: 'https://release-assets.githubusercontent.com/signed/file' },
+          });
+        }
+        return new Response('download', { headers: { 'Content-Length': '8' } });
+      });
+      const response = await createHandler(fixtures, fetcher).fetch(
+        request(`/${prefix}github.com/JQLANG/JQ/releases/download/jq-1.8.1/jq-linux-amd64`),
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('download');
+      expect(response.headers.get('Cache-Control')).toBe('public, max-age=604800');
+      expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
+      expect(response.headers.get('Content-Length')).toBe('8');
+      expect(response.headers.get('Content-Disposition')).toBe(
+        "attachment; filename*=UTF-8''jq-linux-amd64",
+      );
+      expect(urls).toEqual([
+        'https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64',
+        'https://release-assets.githubusercontent.com/signed/file',
+      ]);
+    },
+  );
+
+  it('latest 跟随版本地址和资产地址的两次跳转，并使用 5 分钟缓存', async () => {
+    const urls: string[] = [];
+    const fetcher = fetchMock((remote) => {
+      urls.push(remote.url);
+      expect(remote.headers.has('Authorization')).toBe(false);
+      expect(remote.redirect).toBe('manual');
+      if (remote.url === 'https://github.com/jqlang/jq/releases/latest/download/jq-linux-amd64') {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: 'https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64',
+          },
+        });
+      }
+      if (remote.url === 'https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64') {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: 'https://release-assets.githubusercontent.com/signed/file' },
+        });
+      }
+      return new Response('download');
+    });
+    const response = await createHandler(fixtures, fetcher).fetch(
+      request('/https://github.com/jqlang/jq/releases/latest/download/jq-linux-amd64'),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('download');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(urls).toEqual([
+      'https://github.com/jqlang/jq/releases/latest/download/jq-linux-amd64',
+      'https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64',
+      'https://release-assets.githubusercontent.com/signed/file',
+    ]);
+  });
+
+  it.each([
+    '/https://github.com/unregistered/repo/releases/download/v1/file.zip',
+    '/https://github.com/jqlang/jq/archive/refs/tags/jq-1.8.1.tar.gz',
+    '/https://github.com/jqlang/jq/blob/main/README.md',
+    '/https://github.com/jqlang/jq/releases.atom',
+    '/https://api.github.com/repos/jqlang/jq/releases',
+  ])('未登记或非 Release 附件路径不访问上游 %s', async (path) => {
+    let requests = 0;
+    const fetcher = fetchMock(() => {
+      requests += 1;
+      return new Response('unexpected');
+    });
+    expect((await createHandler(fixtures, fetcher).fetch(request(path), env)).status).toBe(404);
+    expect(requests).toBe(0);
+  });
+
+  it.each([
+    'https://attacker.example/file',
+    'http://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64',
+  ])('拒绝不允许的公开下载跳转 %s', async (location) => {
+    let requests = 0;
+    const fetcher = fetchMock(() => {
+      requests += 1;
+      return new Response(null, { status: 302, headers: { Location: location } });
+    });
+    const response = await createHandler(fixtures, fetcher).fetch(
+      request('/github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64'),
+      env,
+    );
+    expect(response.status).toBe(502);
+    expect(requests).toBe(1);
+  });
+});
+
 describe('IPG Scope 原有更新地址', () => {
   const tokenEnv = { IPG_SCOPE_RELEASES_READ_TOKEN: 'ipg-token' };
   const repository = 'https://api.github.com/repos/Ahua9527/IPG-Scope';
@@ -443,6 +552,7 @@ describe('IPG Scope 原有更新地址', () => {
     expect(config.workers_dev).toBe(false);
     expect(config.preview_urls).toBe(false);
     expect(config.routes).toEqual([{ pattern: 'updates.ahua.space', custom_domain: true }]);
+    expect(PUBLIC_ORIGIN).toBe(`https://${config.routes[0]?.pattern}`);
     expect(config.cache.enabled).toBe(true);
     expect(config.secrets.required).toEqual(
       Object.values(products).map((product) => product.tokenSecret),

@@ -14,6 +14,13 @@
   "cache": {
     "enabled": true
   },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "invocation_logs": false
+    }
+  },
   "secrets": {
     "required": ["IPG_SCOPE_RELEASES_READ_TOKEN"]
   }

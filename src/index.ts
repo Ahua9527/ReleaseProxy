@@ -1,10 +1,12 @@
-import { products } from './products';
+import { products, publicRepositories } from './products';
 import type { Product, ProductRegistry } from './products';
 
-const PUBLIC_ORIGIN = 'https://updates.ahua.space';
+export const PUBLIC_ORIGIN = 'https://updates.ahua.space';
 const GITHUB_API_VERSION = '2026-03-10';
 const LATEST_CACHE = 'public, max-age=300';
 const VERSIONED_CACHE = 'public, max-age=31536000, immutable';
+const MIRROR_PREFIX = /^\/(?:https?:\/\/?)?github\.com(?=\/)/i;
+const MIRROR_CACHE = 'public, max-age=604800';
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
@@ -29,10 +31,17 @@ type Route =
   | { kind: 'alias'; alias: string }
   | { kind: 'versioned'; tag: string; name: string };
 
+interface MirrorRoute {
+  repository: string;
+  tag?: string;
+  name: string;
+}
+
 class ProxyError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly upstream?: number,
   ) {
     super(message);
   }
@@ -142,6 +151,18 @@ function resolveRoute(product: Product, path: string[]): Route | undefined {
   return tag ? versionedRoute(product, tag, name) : undefined;
 }
 
+function resolveMirror(path: string[], mirrors: readonly string[]): MirrorRoute | undefined {
+  const [owner, repo, section, action, tag, name] = path;
+  if (path.length !== 6 || !owner || !repo || section !== 'releases' || !name) return undefined;
+  const repository = mirrors.find(
+    (mirror) => mirror.toLowerCase() === `${owner}/${repo}`.toLowerCase(),
+  );
+  if (!repository) return undefined;
+  if (action === 'download' && tag) return { repository, tag, name };
+  if (action === 'latest' && tag === 'download') return { repository, name };
+  return undefined;
+}
+
 async function getRelease(
   product: Product,
   token: string,
@@ -162,7 +183,8 @@ async function getRelease(
     },
   );
   if (response.status === 404) throw new ProxyError(404, 'Release not found');
-  if (response.status !== 200) throw new ProxyError(502, 'GitHub release lookup failed');
+  if (response.status !== 200)
+    throw new ProxyError(502, 'GitHub release lookup failed', response.status);
   const release = parseRelease(await response.json());
   if (
     release.draft ||
@@ -225,9 +247,19 @@ async function downloadAsset(
     },
   );
   if (response.status === 200 && response.body) return response;
-  if (response.status !== 302) throw new ProxyError(502, 'GitHub asset download failed');
+  if (response.status !== 302)
+    throw new ProxyError(502, 'GitHub asset download failed', response.status);
 
-  const location = response.headers.get('Location');
+  const target = redirectTarget(response.headers.get('Location'));
+
+  // 临时下载地址只接收匿名请求，产品令牌始终留在 GitHub API 请求中。
+  const redirected = await fetcher(target, { redirect: 'manual' });
+  if (redirected.status !== 200 || !redirected.body)
+    throw new ProxyError(502, 'GitHub asset download failed', redirected.status);
+  return redirected;
+}
+
+function redirectTarget(location: string | null, allowedGithubPath?: string): URL {
   let target: URL;
   try {
     target = new URL(location ?? '');
@@ -240,17 +272,16 @@ async function downloadAsset(
     target.password ||
     !(
       target.hostname === 'githubusercontent.com' ||
-      target.hostname.endsWith('.githubusercontent.com')
+      target.hostname.endsWith('.githubusercontent.com') ||
+      (allowedGithubPath &&
+        target.hostname === 'github.com' &&
+        target.pathname.startsWith(allowedGithubPath))
     )
   ) {
     throw new ProxyError(502, 'GitHub asset redirect host is not allowed');
   }
 
-  // 临时下载地址只接收匿名请求，产品令牌始终留在 GitHub API 请求中。
-  const redirected = await fetcher(target, { redirect: 'manual' });
-  if (redirected.status !== 200 || !redirected.body)
-    throw new ProxyError(502, 'GitHub asset download failed');
-  return redirected;
+  return target;
 }
 
 function contentType(name: string): string {
@@ -294,7 +325,49 @@ async function serveRoute(
   return new Response(response.body, { headers });
 }
 
-export function createHandler(registry: ProductRegistry = products, fetcher: typeof fetch = fetch) {
+async function serveMirror(route: MirrorRoute, fetcher: typeof fetch): Promise<Response> {
+  const base = `https://github.com/${route.repository}/releases`;
+  let url: string | URL = route.tag
+    ? `${base}/download/${encodeURIComponent(route.tag)}/${encodeURIComponent(route.name)}`
+    : `${base}/latest/download/${encodeURIComponent(route.name)}`;
+  let upstream: number | undefined;
+  for (let hop = 0; hop < 3; hop += 1) {
+    const response = await fetcher(url, {
+      headers: { 'User-Agent': 'ReleaseProxy' },
+      redirect: 'manual',
+    });
+    upstream = response.status;
+    if (response.status === 200 && response.body) {
+      const headers = responseHeaders(
+        route.tag ? MIRROR_CACHE : LATEST_CACHE,
+        contentType(route.name),
+      );
+      const length = response.headers.get('Content-Length');
+      if (length !== null) headers.set('Content-Length', length);
+      headers.set(
+        'Content-Disposition',
+        `attachment; filename*=UTF-8''${encodeURIComponent(route.name)}`,
+      );
+      return new Response(response.body, { headers });
+    }
+    if ([301, 302, 307, 308].includes(response.status)) {
+      url = redirectTarget(
+        response.headers.get('Location'),
+        `/${route.repository}/releases/download/`,
+      );
+      continue;
+    }
+    if (response.status === 404) throw new ProxyError(404, 'Release asset not found');
+    throw new ProxyError(502, 'GitHub asset download failed', response.status);
+  }
+  throw new ProxyError(502, 'GitHub asset download failed', upstream);
+}
+
+export function createHandler(
+  registry: ProductRegistry = products,
+  fetcher: typeof fetch = fetch,
+  mirrors: readonly string[] = publicRepositories,
+) {
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       if (request.method !== 'GET') {
@@ -302,19 +375,63 @@ export function createHandler(registry: ProductRegistry = products, fetcher: typ
         response.headers.set('Allow', 'GET');
         return response;
       }
-      const path = decodePath(new URL(request.url).pathname);
-      const id = path?.[0];
-      if (!path || !id || !Object.hasOwn(registry, id)) return errorResponse(404, 'Not found');
-      const product = registry[id];
-      if (!product) return errorResponse(404, 'Not found');
-      const route = resolveRoute(product, path.slice(1));
-      if (!route) return errorResponse(404, 'Not found');
-      const token = env[product.tokenSecret]?.trim();
-      if (!token) return errorResponse(503, 'Update origin is unavailable');
-
+      const pathname = new URL(request.url).pathname;
+      let context: { product?: string; repository?: string; route: string } | undefined;
       try {
+        if (MIRROR_PREFIX.test(pathname)) {
+          const path = decodePath(pathname.replace(MIRROR_PREFIX, ''));
+          const route = path ? resolveMirror(path, mirrors) : undefined;
+          if (!route) return errorResponse(404, 'Not found');
+          context = {
+            repository: route.repository,
+            route: route.tag ? 'versioned' : 'latest-file',
+          };
+          return await serveMirror(route, fetcher);
+        }
+        const path = decodePath(pathname);
+        const id = path?.[0];
+        if (!path || !id || !Object.hasOwn(registry, id)) return errorResponse(404, 'Not found');
+        const product = registry[id];
+        if (!product) return errorResponse(404, 'Not found');
+        const route = resolveRoute(product, path.slice(1));
+        if (!route) return errorResponse(404, 'Not found');
+        context = { product: id, route: route.kind };
+        const token = env[product.tokenSecret]?.trim();
+        if (!token) {
+          console.error(
+            JSON.stringify({
+              event: 'token_missing',
+              ...context,
+              status: 503,
+              message: 'Update origin is unavailable',
+            }),
+          );
+          return errorResponse(503, 'Update origin is unavailable');
+        }
         return await serveRoute(id, product, route, token, fetcher);
       } catch (error) {
+        const status = error instanceof ProxyError ? error.status : 502;
+        if (status >= 500) {
+          let name = error instanceof Error ? error.name : 'Error';
+          let message = error instanceof Error ? error.message : 'Unknown error';
+          // 异常消息可能包含调用方抛出的凭据，写日志前遮蔽已配置的产品令牌。
+          for (const product of Object.values(registry)) {
+            const token = env[product.tokenSecret]?.trim();
+            if (token) {
+              name = name.replaceAll(token, '[redacted]');
+              message = message.replaceAll(token, '[redacted]');
+            }
+          }
+          console.error(
+            JSON.stringify({
+              event: 'upstream_failure',
+              ...context,
+              status,
+              ...(error instanceof ProxyError ? { upstream: error.upstream } : { name }),
+              message,
+            }),
+          );
+        }
         if (error instanceof ProxyError) return errorResponse(error.status, error.message);
         return errorResponse(502, 'Update origin is unavailable');
       }
