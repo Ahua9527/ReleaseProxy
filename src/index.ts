@@ -1,14 +1,13 @@
-import { products, publicRepositories } from './products';
-import type { Product, ProductRegistry } from './products';
+import { assetMatcher, loadConfig, tokenSecretName } from './config';
+import type { Product } from './config';
 
-const PUBLIC_ORIGIN = 'https://updates.ahua.space';
 const GITHUB_API_VERSION = '2026-03-10';
 const LATEST_CACHE = 'public, max-age=300';
 const VERSIONED_CACHE = 'public, max-age=31536000, immutable';
 const MIRROR_PREFIX = /^\/(?:https?:\/\/?)?github\.com(?=\/)/i;
 const MIRROR_CACHE = 'public, max-age=604800';
 
-export type Env = Readonly<Record<string, string | undefined>>;
+export type Env = Readonly<Record<string, unknown>>;
 
 interface GithubAsset {
   id: number;
@@ -27,7 +26,6 @@ interface GithubRelease {
 
 type Route =
   | { kind: 'metadata' }
-  | { kind: 'latest-file'; name: string }
   | { kind: 'alias'; alias: string }
   | { kind: 'versioned'; tag: string; name: string };
 
@@ -122,8 +120,12 @@ function decodePath(pathname: string): string[] | undefined {
 }
 
 function versionedRoute(product: Product, tag: string, name: string): Route | undefined {
-  if (!product.tagPattern.test(tag) || !product.isAllowedAsset(tag, name)) return undefined;
+  if (!product.tagPattern.test(tag) || !isAllowedAsset(product, tag, name)) return undefined;
   return { kind: 'versioned', tag, name };
+}
+
+function isAllowedAsset(product: Product, tag: string, name: string): boolean {
+  return product.assets.some((pattern) => assetMatcher(pattern, tag.replace(/^v/, '')).test(name));
 }
 
 function resolveRoute(product: Product, path: string[]): Route | undefined {
@@ -137,18 +139,11 @@ function resolveRoute(product: Product, path: string[]): Route | undefined {
     path.length === 2 &&
     path[0] === 'latest' &&
     path[1] &&
-    Object.hasOwn(product.latestAliases, path[1])
+    Object.hasOwn(product.latest, path[1])
   ) {
     return { kind: 'alias', alias: path[1] };
   }
-  if (path.length !== 1 || !path[0]) return undefined;
-  const name = path[0];
-  if (Object.hasOwn(product.latestFiles, name)) {
-    const asset = product.latestFiles[name];
-    return asset ? { kind: 'latest-file', name: asset } : undefined;
-  }
-  const tag = product.fileTag?.(name);
-  return tag ? versionedRoute(product, tag, name) : undefined;
+  return undefined;
 }
 
 function resolveMirror(path: string[], mirrors: readonly string[]): MirrorRoute | undefined {
@@ -197,8 +192,13 @@ async function getRelease(
   return release;
 }
 
-function releaseMetadata(id: string, product: Product, release: GithubRelease): Response {
-  const base = `${PUBLIC_ORIGIN}/${encodeURIComponent(id)}/releases/download/${encodeURIComponent(release.tag_name)}`;
+function releaseMetadata(
+  origin: string,
+  id: string,
+  product: Product,
+  release: GithubRelease,
+): Response {
+  const base = `${origin}/${encodeURIComponent(id)}/releases/download/${encodeURIComponent(release.tag_name)}`;
   const metadata = {
     tag_name: release.tag_name,
     published_at: release.published_at,
@@ -207,7 +207,7 @@ function releaseMetadata(id: string, product: Product, release: GithubRelease): 
     assets: release.assets
       .filter(
         (asset) =>
-          asset.state === 'uploaded' && product.isAllowedAsset(release.tag_name, asset.name),
+          asset.state === 'uploaded' && isAllowedAsset(product, release.tag_name, asset.name),
       )
       .map((asset) => ({
         name: asset.name,
@@ -294,6 +294,7 @@ function contentType(name: string): string {
 }
 
 async function serveRoute(
+  origin: string,
   id: string,
   product: Product,
   route: Route,
@@ -306,10 +307,12 @@ async function serveRoute(
     route.kind === 'versioned' ? route.tag : undefined,
     fetcher,
   );
-  if (route.kind === 'metadata') return releaseMetadata(id, product, release);
+  if (route.kind === 'metadata') return releaseMetadata(origin, id, product, release);
   const name =
-    route.kind === 'alias' ? product.latestAliases[route.alias]?.(release.tag_name) : route.name;
-  if (!name || !product.isAllowedAsset(release.tag_name, name))
+    route.kind === 'alias'
+      ? product.latest[route.alias]?.replaceAll('{version}', release.tag_name.replace(/^v/, ''))
+      : route.name;
+  if (!name || !isAllowedAsset(product, release.tag_name, name))
     throw new ProxyError(404, 'Release asset not found');
   const asset = release.assets.find(
     (candidate) => candidate.name === name && candidate.state === 'uploaded',
@@ -363,11 +366,7 @@ async function serveMirror(route: MirrorRoute, fetcher: typeof fetch): Promise<R
   throw new ProxyError(502, 'GitHub asset download failed', upstream);
 }
 
-export function createHandler(
-  registry: ProductRegistry = products,
-  fetcher: typeof fetch = fetch,
-  mirrors: readonly string[] = publicRepositories,
-) {
+export function createHandler(fetcher: typeof fetch = fetch) {
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       if (request.method !== 'GET') {
@@ -375,12 +374,15 @@ export function createHandler(
         response.headers.set('Allow', 'GET');
         return response;
       }
-      const pathname = new URL(request.url).pathname;
+      const { pathname, origin } = new URL(request.url);
+      const config = loadConfig(env);
+      const registry = config.products;
       let context: { product?: string; repository?: string; route: string } | undefined;
       try {
         if (MIRROR_PREFIX.test(pathname)) {
+          if (!config.publicRepositories) return configInvalid('PUBLIC_REPOSITORIES');
           const path = decodePath(pathname.replace(MIRROR_PREFIX, ''));
-          const route = path ? resolveMirror(path, mirrors) : undefined;
+          const route = path ? resolveMirror(path, config.publicRepositories) : undefined;
           if (!route) return errorResponse(404, 'Not found');
           context = {
             repository: route.repository,
@@ -390,13 +392,16 @@ export function createHandler(
         }
         const path = decodePath(pathname);
         const id = path?.[0];
-        if (!path || !id || !Object.hasOwn(registry, id)) return errorResponse(404, 'Not found');
+        if (!path || !id) return errorResponse(404, 'Not found');
+        if (!registry) return configInvalid('PRODUCTS');
+        if (!Object.hasOwn(registry, id)) return errorResponse(404, 'Not found');
         const product = registry[id];
         if (!product) return errorResponse(404, 'Not found');
         const route = resolveRoute(product, path.slice(1));
         if (!route) return errorResponse(404, 'Not found');
         context = { product: id, route: route.kind };
-        const token = env[product.tokenSecret]?.trim();
+        const rawToken = env[tokenSecretName(id)];
+        const token = typeof rawToken === 'string' ? rawToken.trim() : undefined;
         if (!token) {
           console.error(
             JSON.stringify({
@@ -408,15 +413,16 @@ export function createHandler(
           );
           return errorResponse(503, 'Update origin is unavailable');
         }
-        return await serveRoute(id, product, route, token, fetcher);
+        return await serveRoute(origin, id, product, route, token, fetcher);
       } catch (error) {
         const status = error instanceof ProxyError ? error.status : 502;
         if (status >= 500) {
           let name = error instanceof Error ? error.name : 'Error';
           let message = error instanceof Error ? error.message : 'Unknown error';
           // 异常消息可能包含调用方抛出的凭据，写日志前遮蔽已配置的产品令牌。
-          for (const product of Object.values(registry)) {
-            const token = env[product.tokenSecret]?.trim();
+          for (const id of Object.keys(registry ?? {})) {
+            const rawToken = env[tokenSecretName(id)];
+            const token = typeof rawToken === 'string' ? rawToken.trim() : undefined;
             if (token) {
               name = name.replaceAll(token, '[redacted]');
               message = message.replaceAll(token, '[redacted]');
@@ -437,6 +443,18 @@ export function createHandler(
       }
     },
   };
+}
+
+function configInvalid(variable: string): Response {
+  console.error(
+    JSON.stringify({
+      event: 'config_invalid',
+      variable,
+      status: 503,
+      message: 'Proxy configuration is invalid',
+    }),
+  );
+  return errorResponse(503, 'Proxy configuration is invalid');
 }
 
 export default createHandler();

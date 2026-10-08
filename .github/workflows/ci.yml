@@ -16,7 +16,7 @@ concurrency:
 jobs:
   check:
     name: 检查与不部署构建
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7

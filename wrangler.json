@@ -3,14 +3,7 @@
   "name": "release-proxy",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-07",
-  "workers_dev": false,
   "preview_urls": false,
-  "routes": [
-    {
-      "pattern": "updates.ahua.space",
-      "custom_domain": true
-    }
-  ],
   "cache": {
     "enabled": true
   },
@@ -21,7 +14,5 @@
       "invocation_logs": false
     }
   },
-  "secrets": {
-    "required": ["IPG_SCOPE_RELEASES_READ_TOKEN"]
-  }
+  "keep_vars": true
 }
