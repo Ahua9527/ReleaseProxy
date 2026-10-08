@@ -1,7 +1,7 @@
 import { products, publicRepositories } from './products';
 import type { Product, ProductRegistry } from './products';
 
-export const PUBLIC_ORIGIN = 'https://updates.ahua.space';
+const PUBLIC_ORIGIN = 'https://updates.ahua.space';
 const GITHUB_API_VERSION = '2026-03-10';
 const LATEST_CACHE = 'public, max-age=300';
 const VERSIONED_CACHE = 'public, max-age=31536000, immutable';

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createHandler, PUBLIC_ORIGIN } from './index';
+import { createHandler } from './index';
 import { products } from './products';
 import type { Product, ProductRegistry } from './products';
 
@@ -447,6 +447,7 @@ describe('公开仓库 Release 附件加速', () => {
   it.each([
     'https://attacker.example/file',
     'http://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64',
+    'https://github.com/evil/repo/releases/download/jq-1.8.1/jq-linux-amd64',
   ])('拒绝不允许的公开下载跳转 %s', async (location) => {
     let requests = 0;
     const fetcher = fetchMock(() => {
@@ -552,7 +553,8 @@ describe('IPG Scope 原有更新地址', () => {
     expect(config.workers_dev).toBe(false);
     expect(config.preview_urls).toBe(false);
     expect(config.routes).toEqual([{ pattern: 'updates.ahua.space', custom_domain: true }]);
-    expect(PUBLIC_ORIGIN).toBe(`https://${config.routes[0]?.pattern}`);
+    // Release 信息用例已断言 browser_download_url 以 origin 开头，此处把它与部署域名绑定。
+    expect(origin).toBe(`https://${config.routes[0]?.pattern}`);
     expect(config.cache.enabled).toBe(true);
     expect(config.secrets.required).toEqual(
       Object.values(products).map((product) => product.tokenSecret),
@@ -565,5 +567,11 @@ describe('IPG Scope 原有更新地址', () => {
     expect(pkg.packageManager).toBe(`bun@${readFileSync('.bun-version', 'utf8').trim()}`);
     expect(pkg.scripts.build).toContain('--dry-run');
     expect(pkg.devDependencies.wrangler).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it('Worker 入口只导出函数和默认处理器，否则运行时拒绝启动', async () => {
+    for (const [name, value] of Object.entries(await import('./index'))) {
+      if (name !== 'default') expect(typeof value, name).toBe('function');
+    }
   });
 });
