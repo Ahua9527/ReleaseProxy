@@ -393,7 +393,7 @@ export function createHandler(fetcher: typeof fetch = fetch) {
         const path = decodePath(pathname);
         const id = path?.[0];
         if (!path || !id) return errorResponse(404, 'Not found');
-        if (!registry) return configInvalid('PRODUCTS');
+        if (!registry) return configInvalid(config.invalidProductsVariable ?? 'PRODUCTS');
         if (!Object.hasOwn(registry, id)) return errorResponse(404, 'Not found');
         const product = registry[id];
         if (!product) return errorResponse(404, 'Not found');
