@@ -58,8 +58,8 @@ run:
     - `gh pr checks <编号> --watch` 最多等 30 分钟；失败用 `gh run view <id> --log-failed` 摘关键行；超时就写明"CI 仍在跑"。
     - 评论内容：结论（可合并 / 需修改 / 有疑问）+ CI 结果 + 问题清单 + 建议。
     - 自动合并：PR 说明首行有 `<!-- paseo-hub: auto-implement issue=#N -->` 标记（场景 D 创建的 PR）、结论是「可合并」、
-      所有检查成功、改动没碰场景 D 的禁区 → `gh pr merge <编号> --squash`，再到对应议题下回一条：已合并、CI 结论、怎么验收。
-      不满足任何一条就不合并，只给结论和原因。
+      所有检查成功、改动没碰场景 D 的禁区 → `gh pr merge <编号> --squash`；合并后必须先到标记里的议题下回一条（已合并、CI 结论、怎么验收），
+      然后才调用 hub.finish_execution。不满足任何一条就不合并，只给结论和原因。
 
     场景 B：已合并的 PR → 盯 main CI + 跟进清单
     - `gh run list -R Ahua9527/ReleaseProxy --branch main --commit <mergeCommit>` 找到合并后的 CI，
