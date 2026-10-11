@@ -124,6 +124,11 @@ https://release-proxy.<账号子域名>.workers.dev/https://github.com/jqlang/jq
 对应产品。[GitHub 令牌创建说明](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)、
 [Release 附件接口权限](https://docs.github.com/en/rest/releases/assets)
 
+## 接入新产品
+
+产品仓库需要调整发布流程和客户端更新地址。可把 [Prompt.md](Prompt.md) 中的提示词交给产品仓库里的
+编程 Agent，由它完成调查和代码适配，并给出需要手动添加的产品变量、令牌 Secret 和验收命令。
+
 ## 自定义域名
 
 在 Cloudflare「Workers → release-proxy → 设置 → 域和路由」添加自定义域名；仓库不登记

@@ -132,6 +132,12 @@ a missing or invalid token only affects its product.
 [Creating GitHub tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens),
 [release asset permissions](https://docs.github.com/en/rest/releases/assets)
 
+## Onboarding a product
+
+Product repositories usually need release workflow and client update URL changes. Give the prompt in
+[Prompt.md](Prompt.md) (Chinese) to a coding agent in the product repository; it investigates, adapts
+the code, and lists the product variable, token Secret, and verification commands to add manually.
+
 ## Custom domains
 
 Add a custom domain under Cloudflare Workers → release-proxy → Settings → Domains & Routes.
