@@ -29,11 +29,11 @@ ReleaseProxy 是运行在 Cloudflare Workers 上的 GitHub Release 下载代理�
 
 ## 配置参考
 
-| 名称                                  | 类型                 | 作用                                                            |
-| ------------------------------------- | -------------------- | --------------------------------------------------------------- |
-| `PUBLIC_REPOSITORIES`                 | 文本或 JSON 数组     | 允许匿名加速的公开仓库，使用 `owner/repo`；文本用逗号或空白分隔 |
-| `PRODUCTS`、`PRODUCTS1`、`PRODUCTS2`… | JSON 或文本形式 JSON | 私有仓库产品登记；控制台 JSON 类型可直接使用对象                |
-| `<产品 ID 大写，- 换 _>_GITHUB_TOKEN` | Secret               | 产品独立只读令牌，例如 `my-app` → `MY_APP_GITHUB_TOKEN`         |
+| 名称                                  | 类型                 | 作用                                                                               |
+| ------------------------------------- | -------------------- | ---------------------------------------------------------------------------------- |
+| `PUBLIC_REPOSITORIES`                 | 文本或 JSON 数组     | 允许匿名加速的公开仓库，使用 `owner/repo`；文本用逗号或空白分隔                    |
+| `PRODUCTS`、`PRODUCTS1`、`PRODUCTS2`… | JSON 或文本形式 JSON | 私有仓库产品登记；控制台 JSON 类型可直接使用对象                                   |
+| `<产品 ID 大写，- 换 _>_GITHUB_TOKEN` | Secret               | 产品只读令牌，例如 `my-app` → `MY_APP_GITHUB_TOKEN`；可用 `tokenSecret` 改名或共用 |
 
 仅需要公开加速时，设置 `PUBLIC_REPOSITORIES` 即可，例如文本 `jqlang/jq, me/MyApp`，
 或 JSON 数组 `["jqlang/jq", "me/MyApp"]`。请求中的仓库名忽略大小写，上游使用登记名称。
@@ -74,6 +74,8 @@ ReleaseProxy 是运行在 Cloudflare Workers 上的 GitHub Release 下载代理�
   `*` 不展开，别名必须指向确定文件。
 - `tagPattern` 可选，为正则表达式字符串，默认 `^v?\d+\.\d+\.\d+$`；JSON 中反斜线要
   双写，例如 `"tagPattern": "^v?\\d+\\.\\d+\\.\\d+$"`。
+- `tokenSecret` 可选，为读取令牌的 Secret 名，必须匹配 `^[A-Z0-9_]+_GITHUB_TOKEN$`；未设置时
+  使用产品 ID 推出的默认名。多个产品写同一个名字即共用一个令牌。这里只写名字，不要写令牌本身。
 - `publicReleasePage` 可选，为登记的公开 Release 页面地址，`{tag}` 替换为 URL 编码后的
   tag。未设置时不返回 `html_url`，不会透传私有仓库页面地址。
 - 附件名、模板和别名不得为空或包含 `/`、`\`，也不得为 `.` 或 `..`。
@@ -118,10 +120,14 @@ https://release-proxy.<账号子域名>.workers.dev/https://github.com/jqlang/jq
 2. 「Repository access」选择「Only select repositories」，仅选这个产品的单个仓库。
 3. 「Repository permissions → Contents」设为「Read-only」。如组织要求审批，先完成审批。
 4. 在 Cloudflare 控制台添加 Secret，名称遵循上述规则，例如 `MY_APP_GITHUB_TOKEN`，
-   值填写该令牌。每个产品分别创建令牌；不要使用共用令牌回退。
+   值填写该令牌。默认每个产品分别创建令牌，不存在隐式的共用令牌回退。
+
+需要共用一个令牌时，在第 2 步勾选这些产品的所有仓库，再给这些产品设置相同的 `tokenSecret`
+（如 `SHARED_GITHUB_TOKEN`），Cloudflare 只添加这一个 Secret。共用令牌过期或泄漏会同时影响
+所有使用它的产品。
 
 客户端与产品发布工作流都不需要此读取令牌。定期更新到期令牌；令牌缺失或失效只影响
-对应产品。[GitHub 令牌创建说明](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)、
+使用它的产品。[GitHub 令牌创建说明](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)、
 [Release 附件接口权限](https://docs.github.com/en/rest/releases/assets)
 
 ## 接入新产品

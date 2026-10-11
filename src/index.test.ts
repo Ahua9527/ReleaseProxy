@@ -529,6 +529,25 @@ describe('环境配置与附件规则', () => {
     },
   );
 
+  it('多个产品可通过 tokenSecret 共用一个令牌', async () => {
+    const worker = createHandler(
+      fetchMock((remote) => {
+        expect(remote.headers.get('Authorization')).toBe('Bearer shared-secret');
+        return json(release('r1', [asset(11, 'app.zip')]));
+      }),
+    );
+    const shared = {
+      PRODUCTS: {
+        first: { ...fixtures.first, tokenSecret: 'SHARED_GITHUB_TOKEN' },
+        second: { ...fixtures.second, tokenSecret: 'SHARED_GITHUB_TOKEN' },
+      },
+      SHARED_GITHUB_TOKEN: 'shared-secret',
+    };
+    for (const id of ['first', 'second']) {
+      expect((await worker.fetch(request(`/${id}/releases/latest`), shared)).status).toBe(200);
+    }
+  });
+
   it('自动合并 PRODUCTS 加数字后缀的变量，忽略其他同前缀变量', async () => {
     const worker = createHandler(fixtureFetch());
     const split = {
@@ -591,6 +610,8 @@ describe('环境配置与附件规则', () => {
     { first: { ...fixtures.first, latest: { 'desktop.zip': 42 } } },
     { first: { ...fixtures.first, latest: null } },
     { first: { ...fixtures.first, tagPattern: '[' } },
+    { first: { ...fixtures.first, tokenSecret: 'github_pat_x' } },
+    { first: { ...fixtures.first, tokenSecret: 'PRODUCTS' } },
   ])('PRODUCTS 无效时返回 503、记录 config_invalid 且不访问上游 %j', async (PRODUCTS) => {
     let requests = 0;
     const log = vi.spyOn(console, 'error');

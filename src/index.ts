@@ -1,4 +1,4 @@
-import { assetMatcher, loadConfig, tokenSecretName } from './config';
+import { assetMatcher, loadConfig } from './config';
 import type { Product } from './config';
 
 const GITHUB_API_VERSION = '2026-03-10';
@@ -400,7 +400,7 @@ export function createHandler(fetcher: typeof fetch = fetch) {
         const route = resolveRoute(product, path.slice(1));
         if (!route) return errorResponse(404, 'Not found');
         context = { product: id, route: route.kind };
-        const rawToken = env[tokenSecretName(id)];
+        const rawToken = env[product.tokenSecret];
         const token = typeof rawToken === 'string' ? rawToken.trim() : undefined;
         if (!token) {
           console.error(
@@ -420,8 +420,8 @@ export function createHandler(fetcher: typeof fetch = fetch) {
           let name = error instanceof Error ? error.name : 'Error';
           let message = error instanceof Error ? error.message : 'Unknown error';
           // 异常消息可能包含调用方抛出的凭据，写日志前遮蔽已配置的产品令牌。
-          for (const id of Object.keys(registry ?? {})) {
-            const rawToken = env[tokenSecretName(id)];
+          for (const { tokenSecret } of Object.values(registry ?? {})) {
+            const rawToken = env[tokenSecret];
             const token = typeof rawToken === 'string' ? rawToken.trim() : undefined;
             if (token) {
               name = name.replaceAll(token, '[redacted]');

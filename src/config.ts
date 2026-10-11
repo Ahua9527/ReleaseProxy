@@ -3,6 +3,8 @@ export interface Product {
   assets: readonly string[];
   latest: Readonly<Record<string, string>>;
   tagPattern: RegExp;
+  // 读取令牌的 Secret 名；多个产品可指向同一个 Secret 共用令牌。
+  tokenSecret: string;
   // 可选公开页面；{tag} 会替换为经过 URL 编码的 tag。
   publicReleasePage?: string;
 }
@@ -65,6 +67,10 @@ function parseProducts(raw: unknown): Config['products'] {
           (asset) => validName(asset) && !/\*\{version\}|\{version\}\*/.test(asset),
         ) ||
         (item.tagPattern !== undefined && typeof item.tagPattern !== 'string') ||
+        // 只接受 Secret 名，避免指向普通变量或误把令牌本身写进配置。
+        (item.tokenSecret !== undefined &&
+          (typeof item.tokenSecret !== 'string' ||
+            !/^[A-Z0-9_]+_GITHUB_TOKEN$/.test(item.tokenSecret))) ||
         (item.publicReleasePage !== undefined && typeof item.publicReleasePage !== 'string')
       )
         return undefined;
@@ -81,6 +87,7 @@ function parseProducts(raw: unknown): Config['products'] {
         assets: [...item.assets],
         latest: { ...latest } as Record<string, string>,
         tagPattern: new RegExp(item.tagPattern ?? '^v?\\d+\\.\\d+\\.\\d+$'),
+        tokenSecret: item.tokenSecret ?? tokenSecretName(id),
         ...(item.publicReleasePage !== undefined
           ? { publicReleasePage: item.publicReleasePage }
           : {}),

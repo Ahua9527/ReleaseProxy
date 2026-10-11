@@ -37,7 +37,8 @@ Release 附件，并作为客户端自动更新源。请完成调查、发布流
     "repository": "owner/repo",
     "assets": ["MyApp-{version}-*.dmg", "MyApp-{version}.apk", "latest.json"],
     "latest": { "macos.dmg": "MyApp-{version}-universal.dmg", "latest.json": "latest.json" },
-    "tagPattern": "^v?\\d+\\.\\d+\\.\\d+$"
+    "tagPattern": "^v?\\d+\\.\\d+\\.\\d+$",
+    "tokenSecret": "SHARED_GITHUB_TOKEN"
   }
 }
 ```
@@ -47,6 +48,8 @@ Release 附件，并作为客户端自动更新源。请完成调查、发布流
   等固定分隔符。名称不得为空、不得含 `/` 或 `\`、不得为 `.` 或 `..`。不在白名单的附件一律 404。
 - `latest`：可选，别名到附件名模板的映射，模板只能用 `{version}`，不能用 `*`，且结果必须在白名单内。
 - `tagPattern`：可选正则，默认 `^v?\d+\.\d+\.\d+$`。草稿、预发布和不符合规则的 tag 一律不分发。
+- `tokenSecret`：可选，读取令牌的 Secret 名（不是令牌本身），须匹配 `^[A-Z0-9_]+_GITHUB_TOKEN$`；
+  不写则用产品 ID 推出的默认名，多个产品写同一个名字即共用一个令牌。
 - `publicReleasePage`：可选的公开发布说明页，`{tag}` 会被替换；不设置则不返回页面地址。
 - 不透传 Release 正文、源码归档、提交和作者信息。附件按原字节分发，代理不改清单和签名。
 - 读取令牌只存于 Cloudflare Secret，客户端和产品发布流程都不需要它。
@@ -80,8 +83,10 @@ Release 附件，并作为客户端自动更新源。请完成调查、发布流
 1. 改动摘要和检查结果。
 2. 产品变量：变量名、压成一行的 JSON 值。在 Cloudflare「Workers → release-proxy → 设置 → 变量和机密」
    添加文本变量后保存并部署；控制台提示「更新 Wrangler 配置」可以忽略。
-3. 令牌 Secret 名：产品 ID 转大写、`-` 换成 `_`，再加 `_GITHUB_TOKEN`（如 `my-app` →
-   `MY_APP_GITHUB_TOKEN`）。令牌在 GitHub 创建细粒度令牌：只选这个仓库，`Contents` 设为 `Read-only`。
+3. 令牌 Secret：默认名为产品 ID 转大写、`-` 换成 `_`，再加 `_GITHUB_TOKEN`（如 `my-app` →
+   `MY_APP_GITHUB_TOKEN`），令牌在 GitHub 创建细粒度令牌：只选这个仓库，`Contents` 设为 `Read-only`。
+   如果我要和其他产品共用已有令牌，在登记里写 `tokenSecret` 为那个 Secret 名，并提醒我在 GitHub 上
+   给该令牌加选这个仓库，不用新建 Secret。
 4. 发布第一个版本后的验收命令（只用 GET），例如：
    - `curl -s <代理地址>/<产品ID>/releases/latest`：能看到新版本和附件列表。
    - `curl -sS -o /dev/null -w '%{http_code}\n' <代理地址>/<产品ID>/latest/<别名>`：返回 200。

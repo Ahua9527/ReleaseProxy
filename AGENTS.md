@@ -6,7 +6,7 @@ ReleaseProxy 是多个产品的私有 GitHub Release 下载代理与原生自动
 - 产品与加速名单来自 Cloudflare 变量，仓库不包含任何部署者配置；请求参数不得决定上游仓库或任意 URL。
 - 公开仓库加速只分发 `PUBLIC_REPOSITORIES` 登记仓库的 Release 附件，匿名访问，不带任何令牌，不透传源码归档。
 - Secret 名为产品 ID 大写、`-` 换成 `_` 后加 `_GITHUB_TOKEN`，如 `my-app` → `MY_APP_GITHUB_TOKEN`。
-- 每个产品用独立 Worker Secret，只授权对应仓库 `Contents: read`。源码、日志和客户端不得包含令牌。
+- 默认每个产品用独立 Worker Secret；产品可用 `tokenSecret` 指定 Secret 名，多个产品共用一个令牌。令牌只授权所用仓库 `Contents: read`。源码、日志和客户端不得包含令牌。
 - 更新清单、签名和安装包按原字节分发；签名私钥及安装流程由各产品维护。
 - 仅公开登记资产及必要 Release 信息；私有说明、源码归档、提交和作者信息不得被透传。
 - 原生目录地址属于客户端合同，改动前检查已有安装版本的依赖。
