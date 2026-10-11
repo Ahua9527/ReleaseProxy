@@ -12,10 +12,18 @@ export type ProductRegistry = Readonly<Record<string, Product>>;
 interface Config {
   // undefined 表示该配置无效；空集合表示未配置。
   products: ProductRegistry | undefined;
+  // products 无效时记录首个出错的变量名，便于定位。
+  invalidProductsVariable?: string;
   publicRepositories: readonly string[] | undefined;
 }
 
-let productsCache: { raw: unknown; value: Config['products'] } | undefined;
+type ProductsConfig = Pick<Config, 'products' | 'invalidProductsVariable'>;
+type ProductsEntries = readonly (readonly [string, unknown])[];
+
+// PRODUCTS、PRODUCTS1、PRODUCTS2…；只认数字后缀，避免把 PRODUCTS_X_GITHUB_TOKEN 当成配置。
+const PRODUCTS_VARIABLE = /^PRODUCTS\d*$/;
+
+let productsCache: { entries: ProductsEntries; value: ProductsConfig } | undefined;
 let repositoriesCache: { raw: unknown; value: Config['publicRepositories'] } | undefined;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -84,6 +92,33 @@ function parseProducts(raw: unknown): Config['products'] {
   }
 }
 
+function productsEntries(env: Readonly<Record<string, unknown>>): ProductsEntries {
+  return Object.keys(env)
+    .filter((name) => PRODUCTS_VARIABLE.test(name))
+    .sort((a, b) => a.length - b.length || a.localeCompare(b))
+    .map((name) => [name, env[name]] as const);
+}
+
+// 按变量名顺序合并；任一变量无效或产品 ID 重复时整体无效。
+function mergeProducts(entries: ProductsEntries): ProductsConfig {
+  const products: Record<string, Product> = {};
+  for (const [name, raw] of entries) {
+    const parsed = parseProducts(raw);
+    if (!parsed || Object.keys(parsed).some((id) => Object.hasOwn(products, id))) {
+      return { products: undefined, invalidProductsVariable: name };
+    }
+    Object.assign(products, parsed);
+  }
+  return { products };
+}
+
+function sameEntries(a: ProductsEntries, b: ProductsEntries): boolean {
+  return (
+    a.length === b.length &&
+    a.every(([name, raw], index) => b[index]?.[0] === name && b[index]?.[1] === raw)
+  );
+}
+
 function parseRepositories(raw: unknown): Config['publicRepositories'] {
   if (raw === undefined || raw === '') return [];
   let value: unknown = raw;
@@ -98,8 +133,9 @@ function parseRepositories(raw: unknown): Config['publicRepositories'] {
 }
 
 export function loadConfig(env: Readonly<Record<string, unknown>>): Config {
-  if (!productsCache || productsCache.raw !== env.PRODUCTS) {
-    productsCache = { raw: env.PRODUCTS, value: parseProducts(env.PRODUCTS) };
+  const entries = productsEntries(env);
+  if (!productsCache || !sameEntries(productsCache.entries, entries)) {
+    productsCache = { entries, value: mergeProducts(entries) };
   }
   if (!repositoriesCache || repositoriesCache.raw !== env.PUBLIC_REPOSITORIES) {
     repositoriesCache = {
@@ -107,7 +143,7 @@ export function loadConfig(env: Readonly<Record<string, unknown>>): Config {
       value: parseRepositories(env.PUBLIC_REPOSITORIES),
     };
   }
-  return { products: productsCache.value, publicRepositories: repositoriesCache.value };
+  return { ...productsCache.value, publicRepositories: repositoriesCache.value };
 }
 
 export function tokenSecretName(id: string): string {

@@ -34,7 +34,7 @@ Workers → release-proxy → Settings → Variables and Secrets, then save and 
 | Name                                                   | Type               | Purpose                                                                                                                  |
 | ------------------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `PUBLIC_REPOSITORIES`                                  | Text or JSON array | Public repositories allowed for anonymous acceleration, as `owner/repo`; separate text entries with commas or whitespace |
-| `PRODUCTS`                                             | JSON or JSON text  | Private repository product registry; dashboard JSON objects are supported directly                                       |
+| `PRODUCTS`, `PRODUCTS1`, `PRODUCTS2`…                  | JSON or JSON text  | Private repository product registry; dashboard JSON objects are supported directly                                       |
 | `<UPPERCASE PRODUCT ID, - replaced by _>_GITHUB_TOKEN` | Secret             | Separate read-only token per product, e.g. `my-app` → `MY_APP_GITHUB_TOKEN`                                              |
 
 For public acceleration alone, set `PUBLIC_REPOSITORIES`, for example text `jqlang/jq, me/MyApp` or
@@ -82,8 +82,14 @@ Field rules:
 - Asset names, templates, and aliases must be nonempty, contain neither `/` nor `\`, and must not be
   `.` or `..`.
 
-Invalid configuration returns 503 for the affected routes and logs `config_invalid`. Invalid `PRODUCTS`
-does not affect public acceleration, and an invalid public allowlist does not affect product routes.
+Products can be split across variables: `PRODUCTS` and `PRODUCTS` followed by digits (such as
+`PRODUCTS1`, `PRODUCTS2`) are merged automatically. Each uses the format above and may hold one or more
+products. To add a product, add the next numbered variable without editing existing JSON. Only numeric
+suffixes are recognized; a product ID that appears in more than one variable makes the configuration invalid.
+
+Invalid configuration returns 503 for the affected routes and logs `config_invalid` with the failing
+variable name in `variable`. Any invalid product variable returns 503 for all product routes. Invalid
+product variables do not affect public acceleration, and an invalid public allowlist does not affect product routes.
 A missing product token returns 503 and logs `token_missing`. Never put tokens in `PRODUCTS`, plain
 variables, source code, or clients.
 
@@ -150,8 +156,8 @@ not fall back to download URLs that bypass the proxy. Preview URLs remain disabl
   publishing must reject overwrites of released tags and assets.
 - Stay on Workers Free: the account shares 100,000 requests per day across products, public acceleration,
   and other Workers, resetting at midnight UTC. Cache hits also count. The hard limit returns Cloudflare 1027.
-- Free Workers allow 64 variables each, including Secrets, with 5 KB per variable. Large `PRODUCTS`
-  configurations are subject to that individual limit. The project does not automatically upgrade plans.
+- Free Workers allow 64 variables each, including Secrets, with 5 KB per variable. Large product
+  configurations can be split across `PRODUCTS1`, `PRODUCTS2`, and so on. The project does not automatically upgrade plans.
 
 [Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/),
 [Workers Cache billing](https://developers.cloudflare.com/workers/cache/)

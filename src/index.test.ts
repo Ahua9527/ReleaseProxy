@@ -529,6 +529,44 @@ describe('环境配置与附件规则', () => {
     },
   );
 
+  it('自动合并 PRODUCTS 加数字后缀的变量，忽略其他同前缀变量', async () => {
+    const worker = createHandler(fixtureFetch());
+    const split = {
+      ...env,
+      PRODUCTS: undefined,
+      PRODUCTS1: { first: fixtures.first },
+      PRODUCTS2: JSON.stringify({ second: fixtures.second }),
+      PRODUCTS_X_GITHUB_TOKEN: 'not-json',
+    };
+    for (const id of ['first', 'second']) {
+      expect((await worker.fetch(request(`/${id}/releases/latest`), split)).status).toBe(200);
+    }
+  });
+
+  it.each([
+    [{ PRODUCTS2: { first: fixtures.second } }, 'PRODUCTS2'],
+    [{ PRODUCTS3: '{broken' }, 'PRODUCTS3'],
+  ])('多个产品变量中重复 ID 或无效时返回 503 并记录出错变量 %j', async (extra, variable) => {
+    const log = vi.spyOn(console, 'error');
+    try {
+      const response = await createHandler(fixtureFetch()).fetch(
+        request('/second/releases/latest'),
+        { ...env, ...extra },
+      );
+      expect(response.status).toBe(503);
+      expect(log).toHaveBeenCalledWith(
+        JSON.stringify({
+          event: 'config_invalid',
+          variable,
+          status: 503,
+          message: 'Proxy configuration is invalid',
+        }),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it.each([
     'jqlang/jq, me/Other',
     'jqlang/jq\nme/Other',

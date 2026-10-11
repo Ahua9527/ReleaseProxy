@@ -32,7 +32,7 @@ ReleaseProxy 是运行在 Cloudflare Workers 上的 GitHub Release 下载代理�
 | 名称                                  | 类型                 | 作用                                                            |
 | ------------------------------------- | -------------------- | --------------------------------------------------------------- |
 | `PUBLIC_REPOSITORIES`                 | 文本或 JSON 数组     | 允许匿名加速的公开仓库，使用 `owner/repo`；文本用逗号或空白分隔 |
-| `PRODUCTS`                            | JSON 或文本形式 JSON | 私有仓库产品登记；控制台 JSON 类型可直接使用对象                |
+| `PRODUCTS`、`PRODUCTS1`、`PRODUCTS2`… | JSON 或文本形式 JSON | 私有仓库产品登记；控制台 JSON 类型可直接使用对象                |
 | `<产品 ID 大写，- 换 _>_GITHUB_TOKEN` | Secret               | 产品独立只读令牌，例如 `my-app` → `MY_APP_GITHUB_TOKEN`         |
 
 仅需要公开加速时，设置 `PUBLIC_REPOSITORIES` 即可，例如文本 `jqlang/jq, me/MyApp`，
@@ -78,7 +78,13 @@ ReleaseProxy 是运行在 Cloudflare Workers 上的 GitHub Release 下载代理�
   tag。未设置时不返回 `html_url`，不会透传私有仓库页面地址。
 - 附件名、模板和别名不得为空或包含 `/`、`\`，也不得为 `.` 或 `..`。
 
-无效配置使对应路由返回 503，日志事件为 `config_invalid`。`PRODUCTS` 无效不影响公开
+产品可以分散到多个变量：`PRODUCTS` 以及 `PRODUCTS` 后接数字的变量（如 `PRODUCTS1`、
+`PRODUCTS2`）会自动合并，每个变量的格式与上例相同，可含一个或多个产品。新增产品时
+直接添加下一个编号的变量即可，无需修改已有 JSON。只识别纯数字后缀；同一产品 ID
+出现在多个变量中视为配置无效。
+
+无效配置使对应路由返回 503，日志事件为 `config_invalid`，`variable` 字段为出错的变量名。
+任一产品变量无效时所有产品路由返回 503。产品变量无效不影响公开
 加速，公开名单无效也不影响产品路由；产品缺少令牌时返回 503 并记录 `token_missing`。
 不要把令牌放入 `PRODUCTS`、普通变量、源码或客户端。
 
@@ -137,8 +143,8 @@ https://release-proxy.<账号子域名>.workers.dev/https://github.com/jqlang/jq
   发布前先上传并验证附件，必须拒绝覆盖已发布的 tag 和附件。
 - 保持 Workers Free：整个账号每日 100,000 次请求，UTC 零点重置，所有产品、公开加速和
   该账号其他 Worker 共享额度；缓存命中同样计入。达到硬上限返回 Cloudflare 1027。
-- Free 计划每个 Worker 最多 64 个变量（含 Secret），每个变量最多 5 KB。大型 `PRODUCTS`
-  配置也受单个变量限制；项目不自动升级付费计划。
+- Free 计划每个 Worker 最多 64 个变量（含 Secret），每个变量最多 5 KB。大型产品配置
+  可拆到 `PRODUCTS1`、`PRODUCTS2` 等多个变量；项目不自动升级付费计划。
 
 [Cloudflare 限制](https://developers.cloudflare.com/workers/platform/limits/)、
 [Workers Cache 计费说明](https://developers.cloudflare.com/workers/cache/)
