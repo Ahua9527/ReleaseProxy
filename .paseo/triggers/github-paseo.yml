@@ -1,0 +1,54 @@
+# Paseo Hub 触发器：在 PR / issue 评论里 @paseo，由 tessa 上的 Codex 处理并回帖。
+# 部署：仓库根目录 `paseo hub deploy --dry-run` 校验，`paseo hub deploy` 安装。文档：https://paseo.sh/docs/hub/triggers
+name: releaseproxy-paseo
+enabled: true
+on:
+  github.issue_comment:
+    connection: ahua9527-github
+    filters:
+      repo: Ahua9527/ReleaseProxy
+      contains: "@paseo"
+      from_users: [Ahua9527]
+max_runtime: 2h
+run:
+  target:
+    daemon: tessa
+    cwd: /Users/tessa/Workspace/Projects/ReleaseProxy
+    worktree:
+      mode: branch-off
+      newBranch: paseo-${{ paseo.execution.id }}
+      base: origin/main
+  agent:
+    provider: codex
+    model: gpt-6.1-sol
+    mode: full-access
+    thinkingOptionId: medium
+  github:
+    connection: ahua9527-github
+    repositories: [Ahua9527/ReleaseProxy]
+    permissions:
+      contents: read
+      pull_requests: write
+      issues: write
+  continuation:
+    mode: conversation
+  startup_timeout: 5m
+  max_runtime: 90m
+  idle_timeout: 10m
+  prompt: |
+    你收到一条 GitHub 评论里的 @paseo 请求。事件上下文（JSON）：
+    ${{ paseo.context }}
+
+    请求内容：
+    <user-prompt>
+    ${{ paseo.prompt }}
+    </user-prompt>
+
+    规则：
+    - 先用 gh 了解情况：gh pr view / gh pr checks / gh run list -R Ahua9527/ReleaseProxy /
+      gh run view <id> --log-failed；需要复现时再 gh pr checkout <编号> 到当前 worktree。
+    - 只调查、复现、评审；不 commit、不 push。
+    - 本仓库 CI 跑在 GitHub 托管的 ubuntu-latest：优先读 CI 日志，不要重跑完整构建；
+      确有必要时只跑与改动相关的最小范围测试。不执行 wrangler deploy 等部署命令。
+    - 用 gh 在同一 PR/issue 下只回一条中文评论：结论、证据（关键日志或文件行）、建议的下一步。
+    - 最后调用 hub.finish_execution（带上本次 executionId）。
