@@ -1,5 +1,6 @@
-# Paseo Hub 触发器：只有在 PR / issue 评论里 @paseo 才会启动，由 tessa 上的 Codex 处理并回帖；
-# 按场景处理：未合并的 PR → 审查 + 等 CI；已合并的 PR → 盯 main CI + 跟进清单；议题 → 分诊 + 打标签。
+# Paseo Hub 触发器：只有在 PR / issue 评论里 @paseo 才会启动，由 tessa 上的 Codex 处理并回帖。
+# 按场景处理：`@paseo 实现 …` → 改代码、开 PR、等 CI、请求审查、通过后合并；
+# 其余 `@paseo …`：未合并的 PR → 审查 + 等 CI（自动实现的 PR 通过后合并）；已合并的 PR → 盯 main CI + 跟进清单；议题 → 分诊 + 打标签。
 # 部署：仓库根目录 `paseo hub deploy --dry-run` 校验，`paseo hub deploy` 安装。文档：https://paseo.sh/docs/hub/triggers
 name: releaseproxy-paseo
 enabled: true
@@ -10,7 +11,7 @@ on:
       repo: Ahua9527/ReleaseProxy
       contains: "@paseo"
       from_users: [Ahua9527]
-max_runtime: 2h
+max_runtime: 4h
 run:
   target:
     daemon: tessa
@@ -23,19 +24,19 @@ run:
     provider: codex
     model: gpt-6.1-sol
     mode: full-access
-    thinkingOptionId: medium
+    thinkingOptionId: high
   github:
     connection: ahua9527-github
     repositories: [Ahua9527/ReleaseProxy]
     permissions:
-      contents: read
+      contents: write
       pull_requests: write
       issues: write
   continuation:
     mode: conversation
   startup_timeout: 5m
-  max_runtime: 90m
-  idle_timeout: 10m
+  max_runtime: 3h
+  idle_timeout: 20m
   prompt: |
     你收到一条 GitHub 评论里的 @paseo 请求。事件上下文（JSON）：
     ${{ paseo.context }}
@@ -46,15 +47,19 @@ run:
     </user-prompt>
 
     怎么做：
-    - 请求里有具体要求就按要求做；只写了 @paseo 或要求含糊时，按下面对应场景的默认做法。
+    - 请求以「实现」开头或明确要求改代码 → 场景 D。其余请求有具体要求就按要求做；只写了 @paseo 或要求含糊时，
+      按场景 A / B / C 的默认做法。
     - 先看上下文 item.type 是 pull_request 还是 issue。是 PR 就先
-      `gh pr view <编号> --json state,isDraft,mergedAt,mergeCommit,headRefOid,title,body,url` 判断是否已合并。
+      `gh pr view <编号> --json state,isDraft,mergedAt,mergeCommit,headRefOid,headRefName,title,body,url` 判断状态。
 
     场景 A：未合并的 PR → 审查 + 等 CI
     - `gh pr checkout <编号>` 到当前 worktree；读 PR 描述和仓库 AGENTS.md / CLAUDE.md 约定；`gh pr diff <编号>`。
     - 按 正确性 → 密钥/安全 → 兼容性契约 → 测试覆盖 找问题，每条给 文件:行号。
     - `gh pr checks <编号> --watch` 最多等 30 分钟；失败用 `gh run view <id> --log-failed` 摘关键行；超时就写明"CI 仍在跑"。
     - 评论内容：结论（可合并 / 需修改 / 有疑问）+ CI 结果 + 问题清单 + 建议。
+    - 自动合并：PR 说明首行有 `<!-- paseo-hub: auto-implement issue=#N -->` 标记（场景 D 创建的 PR）、结论是「可合并」、
+      所有检查成功、改动没碰场景 D 的禁区 → `gh pr merge <编号> --squash`，再到对应议题下回一条：已合并、CI 结论、怎么验收。
+      不满足任何一条就不合并，只给结论和原因。
 
     场景 B：已合并的 PR → 盯 main CI + 跟进清单
     - `gh run list -R Ahua9527/ReleaseProxy --branch main --commit <mergeCommit>` 找到合并后的 CI，
@@ -71,9 +76,27 @@ run:
       needs-triage（拿不准）。wontfix 永远由人定。规划类议题打 ready-for-human，只回一句分类。
     - 评论内容：分类 + 分析或可能原因 + 涉及文件 + 下一步或待补信息。
 
+    场景 D：`@paseo 实现 …` → 做完并推进到合并
+    - 在议题上：读议题全文和评论、仓库 AGENTS.md / CLAUDE.md；按最小改动实现，不顺手重构。在当前 worktree 提交
+      （遵守仓库的提交信息风格），`git push origin HEAD:refs/heads/paseo/issue-<编号>`，然后
+      `gh pr create --base main --head paseo/issue-<编号>`（不用 --draft）：说明首行写
+      `<!-- paseo-hub: auto-implement issue=#<编号> -->`，正文写清改了什么、怎么验证，并包含 `Closes #<编号>`。
+    - 在 PR 上：`gh pr checkout <编号>`，按要求修改，提交后 `git push origin HEAD:refs/heads/<PR 的分支名>`。
+    - 验证：只跑与改动相关的检查（lint、相关测试）；有界面改动时在本机用浏览器或模拟器实际打开看一遍，
+      把验证步骤和结果写进 PR 说明。重命令用 `tessa-lock heavy` 包住；Android 只走 CI，不在本机编译。
+    - `gh pr checks <PR 编号> --watch` 最多等 30 分钟；失败就看 `gh run view <id> --log-failed` 修一轮再推，最多修两轮，
+      仍失败就停下，在议题里说明卡在哪。
+    - CI 全绿后：在 PR 下评论一条且只有 `@paseo`（请求独立审查，审查通过会自动合并）；再到议题下回一条进展：
+      PR 链接、改了什么、怎么验证。
+    - 禁区（需要这些就停下，在议题里说明要人来做）：.github/workflows、发版/部署脚本与配置（release*、wrangler.json、
+      Dockerfile、compose*.yml）、签名与密钥、依赖升级、删除或改写已有数据。
+    - 只推自己的分支：永远不直接推 main、不 force push、不推 tag、不删分支。
+
     通用规则：
-    - 只调查、复现、评审；不 commit、不 push、不触发工作流（gh workflow run）、不推 tag、不合并或关闭 PR / 议题。
+    - 场景 A / B / C 只调查、复现、评审，不 commit、不 push；只有场景 D 可以提交推送，只有场景 A 的自动合并可以改动 main。
+    - 任何评论都不要写出 @paseo 字样（会再次触发），唯一例外是场景 D 请求审查的那一条。
+    - 不触发工作流（gh workflow run）、不推 tag、不关闭 PR / 议题（合并时由 Closes 自动关）。
     - 本仓库 CI 跑在 GitHub 托管的 ubuntu-latest：优先读 CI 日志，不要重跑完整构建；
       确有必要时只跑与改动相关的最小范围测试。不执行 wrangler deploy 等部署命令。
-    - 用 gh 在同一 PR / 议题下只回一条中文评论：结论、证据（关键日志或文件行）、建议的下一步。
+    - 每个场景在同一 PR / 议题下只回一条中文评论：结论、证据（关键日志或文件行）、下一步；场景 D 按上面写的回议题和 PR 各一条。
     - 最后调用 hub.finish_execution（带上本次 executionId）。
