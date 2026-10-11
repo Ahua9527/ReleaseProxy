@@ -35,7 +35,7 @@ Workers → release-proxy → Settings → Variables and Secrets, then save and 
 | ------------------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `PUBLIC_REPOSITORIES`                                  | Text or JSON array | Public repositories allowed for anonymous acceleration, as `owner/repo`; separate text entries with commas or whitespace |
 | `PRODUCTS`, `PRODUCTS1`, `PRODUCTS2`…                  | JSON or JSON text  | Private repository product registry; dashboard JSON objects are supported directly                                       |
-| `<UPPERCASE PRODUCT ID, - replaced by _>_GITHUB_TOKEN` | Secret             | Separate read-only token per product, e.g. `my-app` → `MY_APP_GITHUB_TOKEN`                                              |
+| `<UPPERCASE PRODUCT ID, - replaced by _>_GITHUB_TOKEN` | Secret             | Product read-only token, e.g. `my-app` → `MY_APP_GITHUB_TOKEN`; rename or share it with `tokenSecret`                    |
 
 For public acceleration alone, set `PUBLIC_REPOSITORIES`, for example text `jqlang/jq, me/MyApp` or
 JSON `["jqlang/jq", "me/MyApp"]`. Repository matching ignores case; upstream URLs use the registered name.
@@ -77,6 +77,9 @@ Field rules:
   `assets`; `*` is not expanded here, so an alias must identify an exact file.
 - `tagPattern` is an optional regular expression string, defaulting to `^v?\d+\.\d+\.\d+$`.
   Escape backslashes in JSON, e.g. `"tagPattern": "^v?\\d+\\.\\d+\\.\\d+$"`.
+- `tokenSecret` optionally names the read-token Secret and must match `^[A-Z0-9_]+_GITHUB_TOKEN$`.
+  Without it, the default name derived from the product ID is used. Products with the same name share one
+  token. Put only the name here, never the token itself.
 - `publicReleasePage` optionally provides a registered public release page URL. `{tag}` becomes the
   URL-encoded tag. Without it, `html_url` is omitted; private repository page URLs are never forwarded.
 - Asset names, templates, and aliases must be nonempty, contain neither `/` nor `\`, and must not be
@@ -125,10 +128,15 @@ Only the generic routes above are provided; product root manifest and versioned 
 2. Under Repository access, choose Only select repositories and select this product's single repository.
 3. Set Repository permissions → Contents to Read-only. Complete organization approval if required.
 4. Add a Secret in the Cloudflare dashboard using the naming rule above, e.g. `MY_APP_GITHUB_TOKEN`,
-   with the token as its value. Create a separate token for every product; there is no shared fallback.
+   with the token as its value. Create a separate token for every product by default; there is no
+   implicit shared fallback.
+
+To share one token, select all of those repositories in step 2, then set the same `tokenSecret` (e.g.
+`SHARED_GITHUB_TOKEN`) on those products and add only that Secret. An expired or leaked shared token
+affects every product using it.
 
 Clients and product publishing workflows do not need these read tokens. Rotate expiring tokens;
-a missing or invalid token only affects its product.
+a missing or invalid token only affects the products using it.
 [Creating GitHub tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens),
 [release asset permissions](https://docs.github.com/en/rest/releases/assets)
 
