@@ -9,7 +9,7 @@ on:
     connection: ahua9527-github
     filters:
       repo: Ahua9527/ReleaseProxy
-      contains: "@paseo"
+      contains: '@paseo'
       from_users: [Ahua9527]
 max_runtime: 4h
 run:
